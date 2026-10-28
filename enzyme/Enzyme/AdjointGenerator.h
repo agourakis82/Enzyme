@@ -6582,6 +6582,9 @@ public:
     return;
   }
 
+  bool handleMPIAlltoallv(llvm::CallInst &call, llvm::Function *called,
+                          llvm::StringRef funcName);
+
   void handleMPI(llvm::CallInst &call, llvm::Function *called,
                  llvm::StringRef funcName);
 

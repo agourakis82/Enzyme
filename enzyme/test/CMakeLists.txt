@@ -42,6 +42,22 @@ if(ENZYME_FORTRAN)
   endif()
 endif()
 
+# C++ MPI regressions do not require a Fortran compiler or bindings.
+set(ENZYME_MPI_CXX_ENABLED 0)
+set(ENZYME_MPI_CXX_INCLUDE_FLAGS "")
+set(ENZYME_MPI_CXX_LINK_FLAGS "")
+find_package(MPI COMPONENTS CXX QUIET)
+if(MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
+  set(ENZYME_MPI_CXX_ENABLED 1)
+  foreach(dir IN LISTS MPI_CXX_INCLUDE_DIRS)
+    string(APPEND ENZYME_MPI_CXX_INCLUDE_FLAGS " -I${dir}")
+  endforeach()
+  foreach(lib IN LISTS MPI_CXX_LIBRARIES)
+    string(APPEND ENZYME_MPI_CXX_LINK_FLAGS " ${lib}")
+  endforeach()
+  string(APPEND ENZYME_MPI_CXX_LINK_FLAGS " ${MPI_CXX_LINK_FLAGS}")
+endif()
+
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py MAIN_CONFIG

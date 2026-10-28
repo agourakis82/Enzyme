@@ -2725,6 +2725,7 @@ arePointersGuaranteedNoAlias(llvm::TargetLibraryInfo &TLI, llvm::AAResults &AA,
 static const std::pair<const char *, const char *> KnownMPIFunctions[] = {
     {"abort", "MPI_Abort"},
     {"allgather", "MPI_Allgather"},
+    {"alltoallv", "MPI_Alltoallv"},
     {"allreduce", "MPI_Allreduce"},
     {"barrier", "MPI_Barrier"},
     {"bcast", "MPI_Bcast"},

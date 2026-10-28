@@ -2654,6 +2654,9 @@ bool AdjointGenerator::handleKnownCallDerivatives(
     }
   }
 
+  if (handleMPIAlltoallv(call, called, funcName))
+    return true;
+
   // Canonicalize MPI routine names across calling conventions: the C
   // convention ("MPI_Recv", "PMPI_Recv") as well as Fortran ABI manglings
   // ("mpi_recv_", "mpi_comm_rank__", ...) all map to the canonical C name
