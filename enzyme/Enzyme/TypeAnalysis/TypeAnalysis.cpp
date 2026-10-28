@@ -22,6 +22,7 @@
 // computing the underlying data type of LLVM values.
 //
 //===----------------------------------------------------------------------===//
+#include "../MPICollectives.h"
 #include <cstdint>
 #include <deque>
 
@@ -5562,29 +5563,25 @@ void TypeAnalyzer::visitCallBase(CallBase &call) {
       return;
     }
     if (canonicalizeMPIName(funcName) == "MPI_Alltoallv") {
+      bool FortranABI = isFortranMPICall(funcName);
+      if (call.arg_size() != (FortranABI ? 10u : 9u))
+        return;
       TypeTree Buf(BaseType::Pointer);
-      if (auto C = dyn_cast<Constant>(call.getArgOperand(3))) {
-        C = cast<Constant>(C->stripPointerCasts());
-        if (auto GV = dyn_cast<GlobalVariable>(C)) {
-          if (GV->getName() == "ompi_mpi_double")
-            Buf.insert({0}, Type::getDoubleTy(call.getContext()));
-          if (GV->getName() == "ompi_mpi_float")
-            Buf.insert({0}, Type::getFloatTy(call.getContext()));
-        } else if (auto CI = dyn_cast<ConstantInt>(C)) {
-          if (CI->getValue() == 1275070475)
-            Buf.insert({0}, Type::getDoubleTy(call.getContext()));
-          if (CI->getValue() == 1275069450)
-            Buf.insert({0}, Type::getFloatTy(call.getContext()));
-        }
-      }
-      updateAnalysis(call.getArgOperand(0), Buf.Only(-1, &call), &call);
-      updateAnalysis(call.getArgOperand(4), Buf.Only(-1, &call), &call);
+      if (auto FP = getMPIAlltoallvRealType(call.getArgOperand(3), FortranABI))
+        Buf.insert({0}, FP);
+      for (unsigned I : {0u, 4u})
+        if (!FortranABI || !isMPIFortranBufferSentinel(call.getArgOperand(I)))
+          updateAnalysis(call.getArgOperand(I), Buf.Only(-1, &call), &call);
       TypeTree Meta(BaseType::Pointer);
       Meta.insert({0}, BaseType::Integer);
       for (unsigned I : {1u, 2u, 5u, 6u})
         updateAnalysis(call.getArgOperand(I), Meta.Only(-1, &call), &call);
+      if (FortranABI)
+        for (unsigned I : {3u, 7u, 8u, 9u})
+          updateAnalysis(call.getArgOperand(I), Meta.Only(-1, &call), &call);
       if (!call.getType()->isVoidTy())
-        updateAnalysis(&call, TypeTree(BaseType::Integer).Only(-1, &call), &call);
+        updateAnalysis(&call, TypeTree(BaseType::Integer).Only(-1, &call),
+                       &call);
       return;
     }
     if (canonicalizeMPIName(funcName) == "MPI_Gather" ||

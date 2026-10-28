@@ -58,6 +58,36 @@ if(MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
   string(APPEND ENZYME_MPI_CXX_LINK_FLAGS " ${MPI_CXX_LINK_FLAGS}")
 endif()
 
+# Exercise legacy Fortran MPI symbols from C++ without requiring a Fortran
+# compiler. Some MPI distributions keep these bindings in a separate library.
+set(ENZYME_MPI_FORTRAN_ABI_CXX_ENABLED 0)
+set(ENZYME_MPI_FORTRAN_ABI_LINK_FLAGS "")
+if(ENZYME_MPI_CXX_ENABLED)
+  include(CMakePushCheckState)
+  include(CheckCXXSourceCompiles)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_LIBRARIES ${MPI_CXX_LIBRARIES})
+  find_library(ENZYME_MPI_LEGACY_FORTRAN_LIBRARY NAMES mpi_mpifh mpifort)
+  if(ENZYME_MPI_LEGACY_FORTRAN_LIBRARY)
+    list(APPEND CMAKE_REQUIRED_LIBRARIES ${ENZYME_MPI_LEGACY_FORTRAN_LIBRARY})
+  endif()
+  check_cxx_source_compiles(
+    "extern \"C\" void mpi_alltoallv_(); int main() { mpi_alltoallv_(); }"
+    ENZYME_MPI_LEGACY_FORTRAN_SYMBOL)
+  check_cxx_source_compiles(
+    "extern \"C\" void mpi_alltoallv__(); int main() { mpi_alltoallv__(); }"
+    ENZYME_MPI_LEGACY_FORTRAN_DOUBLE_UNDERSCORE)
+  if(ENZYME_MPI_LEGACY_FORTRAN_SYMBOL)
+    set(ENZYME_MPI_FORTRAN_ABI_CXX_ENABLED 1)
+    set(ENZYME_MPI_FORTRAN_ABI_LINK_FLAGS "${ENZYME_MPI_CXX_LINK_FLAGS}")
+    if(ENZYME_MPI_LEGACY_FORTRAN_LIBRARY)
+      string(APPEND ENZYME_MPI_FORTRAN_ABI_LINK_FLAGS
+        " ${ENZYME_MPI_LEGACY_FORTRAN_LIBRARY}")
+    endif()
+  endif()
+  cmake_pop_check_state()
+endif()
+
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py MAIN_CONFIG

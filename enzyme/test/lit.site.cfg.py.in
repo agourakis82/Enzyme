@@ -186,3 +186,10 @@ if "@ENZYME_MPI_CXX_ENABLED@" == "1":
     config.available_features.add('mpi-cxx')
     if 'HOME' in os.environ:
         config.environment['HOME'] = os.environ['HOME']
+
+config.substitutions.append(("%mpi_fortran_abi_libs", "@ENZYME_MPI_FORTRAN_ABI_LINK_FLAGS@"))
+if "@ENZYME_MPI_FORTRAN_ABI_CXX_ENABLED@" == "1":
+    config.available_features.add("mpi-fortran-abi-cxx")
+
+if "@ENZYME_MPI_LEGACY_FORTRAN_DOUBLE_UNDERSCORE@" == "1":
+    config.available_features.add("mpi-fortran-abi-double-underscore")
