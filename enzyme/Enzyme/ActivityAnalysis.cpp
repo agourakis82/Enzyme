@@ -24,6 +24,7 @@
 // functions that compute this for values and instructions, respectively.
 //
 //===----------------------------------------------------------------------===//
+#include "MPICollectives.h"
 #include <cstdint>
 #include <deque>
 
@@ -115,6 +116,8 @@ cl::list<std::string> EnzymeLoadInactiveFiles(
 
 // clang-format off
 static const StringSet<> InactiveGlobals = {
+    "MPI_F_STATUSES_IGNORE",
+    "MPI_F_STATUS_IGNORE",
     "small_typeof",
     "jl_small_typeof",
     "jl_world_counter",
@@ -785,6 +788,13 @@ bool ActivityAnalyzer::isFunctionArgumentConstant(CallInst *CI, Value *val) {
     if (CanonicalMPIName == "MPI_Recv" || CanonicalMPIName == "MPI_Send") {
       return val != CI->getOperand(0);
     }
+    if (useLegacyMPINonblocking() && isFortranMPICall(Name)) {
+      if (CanonicalMPIName == "MPI_Isend" || CanonicalMPIName == "MPI_Irecv")
+        return val != CI->getOperand(0);
+      if (CanonicalMPIName == "MPI_Waitall")
+        return true;
+    }
+
     // only the recv buffer and request is active for mpi isend/irecv
     if (CanonicalMPIName == "MPI_Irecv" || CanonicalMPIName == "MPI_Isend") {
       return val != CI->getOperand(0) && val != CI->getOperand(6);
@@ -916,6 +926,27 @@ static inline void propagateArgumentInformation(
 /// Return whether this instruction is known not to propagate adjoints
 /// Note that instructions could return an active pointer, but
 /// do not propagate adjoints themselves
+// Completion is an AD runtime effect even when every operand is integer.
+// Follow direct calls so metadata-only wrappers retain their reverse tape.
+static bool containsLegacyCompletion(Function *F,
+                                     SmallPtrSetImpl<Function *> &Seen) {
+  if (!F || F->hasFnAttribute("enzyme_inactive") ||
+      F->hasFnAttribute("enzyme_inactive_inst") || !Seen.insert(F).second)
+    return false;
+  if (isFortranMPICall(F->getName()) &&
+      canonicalizeMPIName(F->getName()) == "MPI_Waitall")
+    return true;
+  if (F->isDeclaration())
+    return false;
+  for (auto &I : instructions(F))
+    if (auto CI = dyn_cast<CallBase>(&I))
+      if (!CI->hasFnAttr("enzyme_inactive") &&
+          !CI->hasFnAttr("enzyme_inactive_inst") &&
+          containsLegacyCompletion(getFunctionFromCall(CI), Seen))
+        return true;
+  return false;
+}
+
 bool ActivityAnalyzer::isConstantInstruction(TypeResults const &TR,
                                              Instruction *I) {
 
@@ -979,6 +1010,15 @@ bool ActivityAnalyzer::isConstantInstruction(TypeResults const &TR,
       return false;
     }
     auto called = getFunctionFromCall(CI);
+    if (useLegacyMPINonblocking() && !isInactiveCall(*CI) &&
+        !CI->hasFnAttr("enzyme_inactive_inst") &&
+        !(called && called->hasFnAttribute("enzyme_inactive_inst"))) {
+      SmallPtrSet<Function *, 16> Seen;
+      if (containsLegacyCompletion(called, Seen)) {
+        ActiveInstructions.insert(I);
+        return false;
+      }
+    }
 
     if (called) {
       if (called->hasFnAttribute("enzyme_active") ||

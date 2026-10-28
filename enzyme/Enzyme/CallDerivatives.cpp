@@ -2654,6 +2654,9 @@ bool AdjointGenerator::handleKnownCallDerivatives(
     }
   }
 
+  if (handleMPILegacyNonblocking(call, called, funcName))
+    return true;
+
   if (handleMPIAlltoallv(call, called, funcName))
     return true;
 

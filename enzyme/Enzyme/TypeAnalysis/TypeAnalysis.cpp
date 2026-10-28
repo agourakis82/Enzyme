@@ -5562,6 +5562,27 @@ void TypeAnalyzer::visitCallBase(CallBase &call) {
       updateAnalysis(&call, TypeTree(BaseType::Integer).Only(-1, &call), &call);
       return;
     }
+    // Legacy nonblocking metadata are integer references, never real shadows.
+    if (useLegacyMPINonblocking() && isFortranMPICall(funcName) &&
+        (canonicalizeMPIName(funcName) == "MPI_Isend" ||
+         canonicalizeMPIName(funcName) == "MPI_Irecv" ||
+         canonicalizeMPIName(funcName) == "MPI_Waitall")) {
+      bool Start = canonicalizeMPIName(funcName) != "MPI_Waitall";
+      unsigned Arity = Start ? 8 : 4;
+      if (call.arg_size() != Arity)
+        return;
+      TypeTree Meta(BaseType::Pointer);
+      Meta.insert({0}, BaseType::Integer);
+      for (unsigned I = Start ? 1 : 0; I < Arity; ++I)
+        updateAnalysis(call.getArgOperand(I), Meta.Only(-1, &call), &call);
+      if (Start && !isMPIFortranBufferSentinel(call.getArgOperand(0))) {
+        TypeTree Buf(BaseType::Pointer);
+        if (auto FP = getMPIAlltoallvRealType(call.getArgOperand(2), true))
+          Buf.insert({0}, FP);
+        updateAnalysis(call.getArgOperand(0), Buf.Only(-1, &call), &call);
+      }
+      return;
+    }
     if (canonicalizeMPIName(funcName) == "MPI_Alltoallv") {
       bool FortranABI = isFortranMPICall(funcName);
       if (call.arg_size() != (FortranABI ? 10u : 9u))

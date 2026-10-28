@@ -468,3 +468,9 @@ install(
   COMPONENT dev)
 
 install(EXPORT EnzymeTargets DESTINATION "${INSTALL_CMAKE_DIR}" COMPONENT dev)
+
+option(ENZYME_ENABLE_MPI_LEGACY_RUNTIME "Build experimental legacy Fortran MPI AD runtime" OFF)
+if(ENZYME_ENABLE_MPI_LEGACY_RUNTIME)
+  enable_testing()
+  add_subdirectory(runtimes/MPILegacy)
+endif()

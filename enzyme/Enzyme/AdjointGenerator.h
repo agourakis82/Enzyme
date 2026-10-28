@@ -6582,6 +6582,8 @@ public:
     return;
   }
 
+  bool handleMPILegacyNonblocking(llvm::CallInst &call, llvm::Function *called,
+                                  llvm::StringRef Name);
   bool handleMPIAlltoallv(llvm::CallInst &call, llvm::Function *called,
                           llvm::StringRef funcName);
 

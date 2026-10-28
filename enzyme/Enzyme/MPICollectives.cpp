@@ -7,6 +7,10 @@
 #include <functional>
 
 using namespace llvm;
+static cl::opt<bool>
+    LegacyNB("enzyme-mpi-legacy-nonblocking", cl::init(false), cl::Hidden,
+             cl::desc("Use experimental legacy MPI nonblocking runtime"));
+bool useLegacyMPINonblocking() { return LegacyNB; }
 namespace {
 // Metadata is discrete, but its values must survive mutations after the call.
 // The fifth array holds compact reverse-receive offsets. Using original send
@@ -400,5 +404,107 @@ bool AdjointGenerator::handleMPIAlltoallv(CallInst &call, Function *called,
   }
   if (Mode == DerivativeMode::ReverseModeGradient)
     eraseIfUnused(call, /*erase*/ true, /*check*/ false);
+  return true;
+}
+
+// Experimental optional runtime: generated programs must link
+// LegacyRuntime.cpp.
+bool AdjointGenerator::handleMPILegacyNonblocking(CallInst &call,
+                                                  Function *called,
+                                                  StringRef Name) {
+  if (!useLegacyMPINonblocking() || !isFortranMPICall(Name))
+    return false;
+  auto Canon = canonicalizeMPIName(Name);
+  bool Start = Canon == "MPI_Isend" || Canon == "MPI_Irecv";
+  bool Wait = Canon == "MPI_Waitall";
+  if (!Start && !Wait)
+    return false;
+  if (call.hasFnAttr("enzyme_inactive") ||
+      call.hasFnAttr("enzyme_inactive_inst") ||
+      (called && (called->hasFnAttribute("enzyme_inactive") ||
+                  called->hasFnAttribute("enzyme_inactive_inst"))))
+    return false;
+  auto New = cast<CallInst>(gutils->getNewFromOriginal(&call));
+  IRBuilder<> B(New);
+  unsigned Arity = Start ? 8 : 4;
+  bool Valid = called && call.arg_size() == Arity &&
+               called->arg_size() == Arity && !called->isVarArg() &&
+               call.getType()->isVoidTy() &&
+               call.getCallingConv() == CallingConv::C &&
+               called->getCallingConv() == CallingConv::C &&
+               call.getFunctionType() == called->getFunctionType();
+  if (Valid)
+    for (unsigned I = 0; I < Arity; ++I) {
+      auto P = dyn_cast<PointerType>(call.getArgOperand(I)->getType());
+      Valid &= P && P->getAddressSpace() == 0;
+    }
+  auto FP = Valid && Start
+                ? getMPIAlltoallvRealType(call.getArgOperand(2), true)
+                : nullptr;
+  if (!Valid || gutils->getWidth() != 1 || gutils->runtimeActivity ||
+      Mode == DerivativeMode::ForwardModeSplit ||
+      (Start && (!FP || !FP->isDoubleTy() ||
+                 isMPIFortranBufferSentinel(call.getArgOperand(0)) ||
+                 gutils->isConstantValue(call.getArgOperand(0))))) {
+    EmitNoDerivativeError(
+        "experimental legacy MPI nonblocking requires scalar active double "
+        "buffers, immutable i32 datatype handles and optional runtime",
+        call, gutils, B);
+    return true;
+  }
+  auto &M = *called->getParent();
+  auto Ptr = getUnqual(B.getInt8Ty());
+  bool Forward = Mode == DerivativeMode::ForwardMode ||
+                 Mode == DerivativeMode::ForwardModeError;
+  auto Primal = [&](unsigned I) {
+    return B.CreatePointerCast(
+        gutils->getNewFromOriginal(call.getArgOperand(I)), Ptr);
+  };
+  Value *Tape;
+  if (Mode == DerivativeMode::ReverseModeGradient) {
+    Tape = B.CreatePHI(Ptr, 0);
+  } else {
+    SmallVector<Value *, 12> Args{B.CreatePointerCast(called, Ptr)};
+    SmallVector<Type *, 12> Types{Ptr};
+    if (Start) {
+      Args.push_back(Primal(0));
+      Types.push_back(Ptr);
+      Args.push_back(B.CreatePointerCast(
+          gutils->invertPointerM(call.getArgOperand(0), B), Ptr));
+      Types.push_back(Ptr);
+      for (unsigned I = 1; I < 8; ++I) {
+        Args.push_back(Primal(I));
+        Types.push_back(Ptr);
+      }
+      Args.push_back(B.getInt32(Canon == "MPI_Irecv"));
+      Types.push_back(B.getInt32Ty());
+    } else {
+      for (unsigned I = 0; I < 4; ++I) {
+        Args.push_back(Primal(I));
+        Types.push_back(Ptr);
+      }
+    }
+    Args.push_back(B.getInt32(!Forward));
+    Types.push_back(B.getInt32Ty());
+    auto Runtime = M.getOrInsertFunction(Start ? "__enzyme_legacy_nb_start"
+                                               : "__enzyme_legacy_nb_waitall",
+                                         FunctionType::get(Ptr, Types, false));
+    auto Saved = B.CreateCall(Runtime, Args);
+    gutils->TapesToPreventRecomputation.insert(Saved);
+    Tape = Saved;
+  }
+  if (!Forward) {
+    Tape =
+        gutils->cacheForReverse(B, Tape, getIndex(&call, CacheType::Tape, B));
+    if (Mode != DerivativeMode::ReverseModePrimal) {
+      getReverseBuilder(B, /*original=*/false);
+      auto Runtime =
+          M.getOrInsertFunction(Start ? "__enzyme_legacy_nb_reverse_start"
+                                      : "__enzyme_legacy_nb_reverse_wait",
+                                FunctionType::get(B.getVoidTy(), {Ptr}, false));
+      B.CreateCall(Runtime, {lookup(Tape, B)});
+    }
+  }
+  eraseIfUnused(call, /*erase=*/true, /*check=*/false);
   return true;
 }

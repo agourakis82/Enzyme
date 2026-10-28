@@ -9,3 +9,6 @@ class Value;
 // The legacy Fortran ABI requires an immutable global i32 handle.
 llvm::Type *getMPIAlltoallvRealType(llvm::Value *V, bool FortranABI);
 bool isMPIFortranBufferSentinel(llvm::Value *V);
+
+// Experimental generated code requires the separately linked MPI runtime.
+bool useLegacyMPINonblocking();
