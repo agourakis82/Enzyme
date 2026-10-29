@@ -1,10 +1,12 @@
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-// Experimental lifecycle prototype, not yet an Enzyme-generated runtime.
+// Experimental lifecycle used by compiler-generated legacy MPI AD calls.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <mpi.h>
 #include <set>
@@ -25,6 +27,17 @@ inline void checked(int rc) {
   if (rc != MPI_SUCCESS)
     fail("MPI error");
 }
+namespace detail {
+inline std::size_t statusWordCount(MPI_Fint count) {
+  static_assert(MPI_F_STATUS_SIZE > 0);
+  if (count < 0)
+    fail("negative wait count");
+  const auto n = static_cast<std::size_t>(count);
+  if (n > std::numeric_limits<std::size_t>::max() / MPI_F_STATUS_SIZE)
+    fail("status storage size overflow");
+  return n * static_cast<std::size_t>(MPI_F_STATUS_SIZE);
+}
+} // namespace detail
 enum class Mode { Forward, Reverse };
 enum class Kind { Send, Receive };
 struct Record {
@@ -113,8 +126,7 @@ public:
   }
   Batch wait(WaitAll primal, MPI_Fint n, MPI_Fint *slots, MPI_Fint *statuses,
              MPI_Fint *ierr) {
-    if (n < 0)
-      fail("negative wait count");
+    const auto words = detail::statusWordCount(n);
     Batch batch;
     for (MPI_Fint i = 0; i < n; ++i) {
       auto it = pending.find(slots + i);
@@ -129,11 +141,11 @@ public:
         fail("request value changed");
       batch.push_back(r);
     }
-    std::vector<MPI_Fint> scratch((n ? n : 1) * MPI_F_STATUS_SIZE);
+    std::vector<MPI_Fint> scratch(words ? words : detail::statusWordCount(1));
     primal(&n, slots, scratch.data(), ierr);
     checked(*ierr);
     if (statuses != MPI_F_STATUSES_IGNORE)
-      for (MPI_Fint i = 0; i < n * MPI_F_STATUS_SIZE; ++i)
+      for (std::size_t i = 0; i < words; ++i)
         statuses[i] = scratch[i];
     Batch reverse;
     for (MPI_Fint i = 0; i < n; ++i) {
@@ -141,7 +153,10 @@ public:
       if (!r)
         continue;
       MPI_Status status;
-      checked(MPI_Status_f2c(scratch.data() + i * MPI_F_STATUS_SIZE, &status));
+      checked(MPI_Status_f2c(
+          scratch.data() + static_cast<std::size_t>(i) *
+                               static_cast<std::size_t>(MPI_F_STATUS_SIZE),
+          &status));
       int cancelled;
       checked(MPI_Test_cancelled(&status, &cancelled));
       if (cancelled)

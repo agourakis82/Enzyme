@@ -69,6 +69,10 @@ endforeach()
 set_tests_properties(EnzymeMPILegacy.lifecycle EnzymeMPILegacy.reject.overlap
   EnzymeMPILegacy.reject.copied PROPERTIES TIMEOUT 40
   ENVIRONMENT "OMPI_MCA_rmaps_base_oversubscribe=1")
+add_executable(EnzymeMPILegacyStatusSizes status_sizes.cpp)
+target_link_libraries(EnzymeMPILegacyStatusSizes PRIVATE EnzymeMPILegacyRuntime)
+list(APPEND test_targets EnzymeMPILegacyStatusSizes)
+add_test(NAME EnzymeMPILegacy.status-sizes COMMAND EnzymeMPILegacyStatusSizes)
 add_custom_target(check-enzyme-mpi-legacy
   COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^EnzymeMPILegacy[.]"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"

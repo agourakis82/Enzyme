@@ -51,3 +51,7 @@ Existing C Alltoallv work overlaps l90lpa's draft PR #1292 and retains that cred
 the combined private candidate is not claimed as the first C implementation.
 The prior scientific replay receipts are separate from these focused tests and
 from official upstream CI or a full FMS/MOM6 model execution.
+
+Status-array allocation, copy bounds and per-request offsets use checked size_t
+arithmetic. The boundary unit test checks count arithmetic without allocating
+billions of requests/statuses; it is not a large-count MPI execution test.
